@@ -1,0 +1,875 @@
+{
+  "name": "So-Mot Sales Agent v2.0 - Complete",
+  "description": "AI-powered sales agent with So-Mot API, Airtable CRM, Facebook & Instagram integration",
+  "active": true,
+  "nodes": [
+    {
+      "parameters": {
+        "mode": "every",
+        "interval": 6,
+        "unit": "hours",
+        "triggerAtStartup": true
+      },
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        1600
+      ],
+      "id": "menu-sync-trigger",
+      "name": "🔄 Cron: Sync Menu Every 6 Hours"
+    },
+    {
+      "parameters": {
+        "url": "https://so-mot.com/wp-json/wc/v3/products",
+        "method": "GET",
+        "authentication": "basicAuth",
+        "basicAuth": {
+          "user": "={{ $env.SOMOT_CONSUMER_KEY }}",
+          "password": "={{ $env.SOMOT_CONSUMER_SECRET }}"
+        },
+        "queryParameters": {
+          "per_page": "100",
+          "orderby": "menu_order",
+          "status": "publish"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        1600
+      ],
+      "id": "fetch-somot-products",
+      "name": "📦 HTTP: Fetch So-Mot Products"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const products = $json.body;\nconst parsed = products.map(p => ({\n  id: p.id,\n  name: p.name,\n  description: p.description,\n  price: parseFloat(p.price),\n  regular_price: parseFloat(p.regular_price),\n  sale_price: p.sale_price ? parseFloat(p.sale_price) : null,\n  category: p.categories[0]?.name || 'Uncategorized',\n  category_id: p.categories[0]?.id,\n  image: p.images[0]?.src,\n  sku: p.sku,\n  stock_quantity: p.stock_quantity,\n  in_stock: p.in_stock,\n  url: p.permalink,\n  type: p.type,\n  timestamp: new Date().toISOString()\n}));\nreturn [{ json: { success: true, total: parsed.length, products: parsed } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -800,
+        1600
+      ],
+      "id": "parse-products",
+      "name": "🔄 Code: Parse Products"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "upsert",
+        "baseId": {
+          "__rl": true,
+          "value": "appXXXXXXXXXXXXXX",
+          "mode": "list",
+          "cachedResultName": "Your Base"
+        },
+        "tableId": {
+          "__rl": true,
+          "value": "tblMenuXXXXXXXXXX",
+          "mode": "list",
+          "cachedResultName": "Products_Cache"
+        },
+        "keyFields": [
+          "sku"
+        ],
+        "data": "={{ $json.products }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        -400,
+        1600
+      ],
+      "id": "airtable-cache-menu",
+      "name": "💾 Airtable: Cache Menu Data"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const products = $json.products.filter(p => p.type === 'variable');\nconst variationRequests = products.map(p => ({ productId: p.id, name: p.name }));\nreturn variationRequests.map(req => ({ json: req }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1600
+      ],
+      "id": "prepare-variations-fetch",
+      "name": "📋 Code: Prepare Variations"
+    },
+    {
+      "parameters": {
+        "url": "=https://so-mot.com/wp-json/wc/v3/products/{{ $json.productId }}/variations",
+        "method": "GET",
+        "authentication": "basicAuth",
+        "basicAuth": {
+          "user": "={{ $env.SOMOT_CONSUMER_KEY }}",
+          "password": "={{ $env.SOMOT_CONSUMER_SECRET }}"
+        },
+        "queryParameters": {
+          "per_page": "100"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        400,
+        1600
+      ],
+      "id": "fetch-variations",
+      "name": "📏 HTTP: Fetch Variations"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "if ($json.statusCode && $json.statusCode >= 400) {\n  return [{ json: { success: false, error: $json.message || 'API Error', statusCode: $json.statusCode, timestamp: new Date().toISOString() } }];\n}\nreturn [$json];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        1600
+      ],
+      "id": "error-handler",
+      "name": "⚠️ Code: Error Handler"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const products = $json.products;\nconst byCategory = {};\nproducts.forEach(p => {\n  if (!byCategory[p.category]) byCategory[p.category] = [];\n  byCategory[p.category].push({ id: p.id, name: p.name, price: p.price, image: p.image, stock: p.stock_quantity });\n});\nconst aiContext = { menu: byCategory, total_products: products.length, categories: Object.keys(byCategory), last_updated: new Date().toISOString(), ready_for_ai: true };\nreturn [{ json: aiContext }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        1600
+      ],
+      "id": "build-ai-context",
+      "name": "🧠 Code: Build AI Context"
+    },
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "httpMethod": [
+          "POST",
+          "GET"
+        ],
+        "path": "meta-sales-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1296,
+        432
+      ],
+      "id": "04b004fa-a779-4cd9-b8cd-cd75ca36affc",
+      "name": "Facebook Trigger",
+      "webhookId": "b7e461f0-9a0d-4e27-9e86-f74a3e684e3a"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "26a3553a-f37b-4f46-9a84-3f1661a5d152",
+              "name": "trigger",
+              "value": "facebook",
+              "type": "string"
+            },
+            {
+              "id": "11ae4f49-44ec-4416-a8d2-49a15fdf1e63",
+              "name": "text",
+              "value": "={{ $json.body.entry[0].messaging[0].message.text }}",
+              "type": "string"
+            },
+            {
+              "id": "3cfa9c98-dca2-43e6-9d69-7a20f61772f6",
+              "name": "sessionId",
+              "value": "={{ $json.body.entry[0].messaging[0].sender.id }}",
+              "type": "string"
+            },
+            {
+              "id": "f8d11aca-c325-4d8c-9c67-ef9440756f05",
+              "name": "channelId",
+              "value": "={{ $json.body.entry[0].id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -448,
+        496
+      ],
+      "id": "5e92c88b-f0c3-460e-8e60-7a8d81e47618",
+      "name": "Edit Fields - facebook"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "\"EVENT_RECEIVED\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1008,
+        352
+      ],
+      "id": "8077f39f-8988-43bf-87ad-0fd29f30a6a7",
+      "name": "Respond to Webhook - facebook post"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -1008,
+        528
+      ],
+      "id": "b6cf5ffc-96ce-443a-8c24-bd887901741c",
+      "name": "Respond to Webhook - facebook get"
+    },
+    {
+      "parameters": {
+        "multipleMethods": true,
+        "httpMethod": [
+          "POST",
+          "GET"
+        ],
+        "path": "benai-metaIG-URL",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1232,
+        992
+      ],
+      "id": "66919b72-0016-4e79-93f4-3a389d334765",
+      "name": "Instagram Trigger",
+      "webhookId": "cc6546da-6f16-4546-ada3-e2c83b208997"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "={{ $json.query['hub.challenge'] }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        1088
+      ],
+      "id": "13dbc7ec-d0d5-4087-9cef-20df236219f9",
+      "name": "Respond to Webhook - instagram get"
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "\"EVENT_RECEIVED\"",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        -976,
+        912
+      ],
+      "id": "76ef689a-6efd-494e-8c49-c3735bcb4db0",
+      "name": "Respond to Webhook - instagram post"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "26a3553a-f37b-4f46-9a84-3f1661a5d152",
+              "name": "trigger",
+              "value": "instagram",
+              "type": "string"
+            },
+            {
+              "id": "11ae4f49-44ec-4416-a8d2-49a15fdf1e63",
+              "name": "text",
+              "value": "={{ $json.body.entry[0].messaging[0].message.text }}",
+              "type": "string"
+            },
+            {
+              "id": "3cfa9c98-dca2-43e6-9d69-7a20f61772f6",
+              "name": "sessionId",
+              "value": "={{ $json.body.entry[0].messaging[0].sender.id }}",
+              "type": "string"
+            },
+            {
+              "id": "679e091e-d9dd-4cc3-b5a1-97f3790e09d0",
+              "name": "channelId",
+              "value": "={{ $json.body.entry[0].id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        880
+      ],
+      "id": "d8fd5e8d-58a8-45f6-ab7e-35cdf4b1af89",
+      "name": "Edit Fields - instagram"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7dee1826-e2b5-44ea-9c0f-a0adb5bc740c",
+              "leftValue": "={{ $json.body.entry[0].messaging[0].message?.is_echo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -752,
+        352
+      ],
+      "id": "1b0b3b15-f6a9-4b06-8d6a-4ea2f3de3ca9",
+      "name": "If is not echo - facebook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "7dee1826-e2b5-44ea-9c0f-a0adb5bc740c",
+              "leftValue": "={{ $json.body.entry[0].messaging[0].message?.is_echo }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -752,
+        912
+      ],
+      "id": "eeb060ad-75fd-42fe-b06b-ef4a4dbd25d5",
+      "name": "If is not echo - instagram"
+    },
+    {
+      "parameters": {
+        "promptType": "=define",
+        "text": "==== CUSTOMER MESSAGE ===\n{{ $json.text || \"NO_MESSAGE\" }}\n\n=== CHANNEL ===\n{{ $json.trigger || \"unknown\" }}\n\n=== SESSION ===\n{{ $json.sessionId || \"unknown\" }}\n\n=== MENU CONTEXT ===\n{{ $json.menu | json }}\n\n=== SYSTEM CONTEXT ===\n\nIntent:\n{{ $json.intent || \"UNKNOWN\" }}\n\nDetected product:\n{{ $json.product || \"NONE\" }}\n\nRecommended branch:\n{{ $json.branch || $json.recommended_branch || \"UNKNOWN\" }}\n\nDelivery available:\n{{ $json.delivery_available ?? \"UNKNOWN\" }}\n\nCheckout link:\n{{ $json.checkout_link || \"NONE\" }}\n\n=== RESPONSE OBJECTIVE ===\n\nRespond like a helpful restaurant staff.\n\nUnderstand the customer's request and guide them to the next step.\n\nPossible actions:\n\n• confirm order\n• recommend menu\n• confirm delivery\n• provide branch location\n• guide customer to checkout\n\n---\n\nIf INTENT = ORDER\n\nConfirm the order.\n\nIf product detected:\nconfirm quantity.\n\nIf checkout link exists:\nguide customer to payment.\n\nExample:\n\n\"Great choice! Your order is ready.\n\nYou can complete the payment here:\n[checkout link]\"\n\n---\n\nIf INTENT = MENU\n\nRecommend items from the menu database.\n\nExample:\n\n\"Our popular items today are:\n\n• Beef Pho\n• Fresh Spring Rolls...\n\nWould you like to order one of these?\"\n---\n\nIf INTENT = LOCATION\n\nProvide nearest branch.\n\nAsk dine-in or delivery.\n\n---\n\nIf delivery_available = false\n\nExplain politely and suggest dine-in.\n\n---\n\n=== SALES IMPROVEMENT ===\n\nWhen appropriate suggest 1 drink or side item.\n\nExample:\n\n\"Many customers also enjoy Vietnamese iced coffee with that.\"\n\n---\n\nReturn only the customer response.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "=You are a professional restaurant sales assistant for So-Mot Vietnamese Restaurant.\n\nYour job is to help customers order food, ask about menu items, store locations, delivery availability, or promotions.\n\nYou must behave like a real restaurant staff member.\n\nNever mention:\n- AI\n- system\n- automation\n- workflow\n- internal logic\n\nAlways respond:\n\n• Friendly\n• Natural\n• Short\n• Helpful\n• Sales-oriented\n\nYou support:\n\nEnglish\nTagalog\nVietnamese\n\nAlways respond in the same language as the customer.\n\nSales behaviour:\n\n1. If customer asks about food → recommend 2 items.\n2. If customer wants to order → confirm item and quantity.\n3. If delivery → confirm location first.\n4. If checkout link exists → guide customer to payment.\n5. If unclear → ask a short question.\n\nNever invent:\n\nproducts  \nbranches  \nlinks  \n\nUse only provided information.\n\nCurrent time:\n{{ $now }}\n\nCustomer channel:\n{{ $json.trigger ?? \"unknown\" }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [
+        2256,
+        416
+      ],
+      "id": "c9c0dbf4-f31b-4a51-b99d-2020964f7705",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "9df0a1da-742d-4ac6-b4f8-a76006c314db",
+                    "leftValue": "={{$json.trigger}}",
+                    "rightValue": "facebook",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "facebook"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "98550c9d-4266-4694-8d5a-a3972d6aad22",
+                    "leftValue": "={{$json.trigger}}",
+                    "rightValue": "instagram",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "instagram"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2720,
+        1008
+      ],
+      "id": "e39360ca-a99d-4cd5-ace7-b74344100868",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v21.0",
+        "node": "me",
+        "edge": "messages",
+        "options": {
+          "queryParametersJson": "={\n  \"recipient\":{\n    \"id\":\"{{ $json.sessionId }}\"\n  },\n  \"sender_action\":\"typing_on\"\n}"
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        336
+      ],
+      "id": "34d52143-38a8-4a7a-a21f-8e3a9d490af1",
+      "name": "Sales Agent Demo - typing_on",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "Mb4uYnGcx1FUuypk",
+          "name": "Facebook Graph account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpRequestMethod": "POST",
+        "graphApiVersion": "v21.0",
+        "node": "me",
+        "edge": "messages",
+        "options": {
+          "queryParametersJson": "={\n  \"recipient\":{\n    \"id\":\"{{ $json.sessionId }}\"\n  },\n  \"messaging_type\": \"RESPONSE\",\n  \"message\":{\n    \"text\":{{ JSON.stringify($json.output.substring(0,1000)) }}\n  }\n}"
+        }
+      },
+      "type": "n8n-nodes-base.facebookGraphApi",
+      "typeVersion": 1,
+      "position": [
+        3152,
+        304
+      ],
+      "id": "6f3b3dd1-6863-44e8-af06-a59084b563cc",
+      "name": "Facebook Graph API - Sales Agent Demo",
+      "credentials": {
+        "facebookGraphApi": {
+          "id": "LQaoWme6o1ndxXt9",
+          "name": "Facebook Graph account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.instagram.com/v25.0/me/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\":{\n    \"id\":\"{{ $json.sessionId }}\"\n  },\n  \"message\":{\n    \"text\":{{ JSON.stringify($json.output.substring(0,1000)) }}\n  }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3184,
+        720
+      ],
+      "id": "a145011c-e2df-4748-8f66-cbac50eba685",
+      "name": "Instagram Graph API - smb.sales.agent.demo",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "dJJJEd8ykWtRqouj",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const order = {\n  customer_name: $json.customer_name || 'Unknown',\n  customer_email: $json.customer_email || '',\n  customer_phone: $json.customer_phone || '',\n  items: JSON.stringify($json.items || []),\n  total_price: $json.total_price || 0,\n  delivery_address: $json.delivery_address || '',\n  delivery_zone: $json.delivery_zone || '',\n  delivery_fee: $json.delivery_fee || 0,\n  status: 'PENDING',\n  channel: $json.trigger || 'unknown',\n  session_id: $json.sessionId || '',\n  created_at: new Date().toISOString(),\n  updated_at: new Date().toISOString()\n};\nreturn [{ json: order }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        800
+      ],
+      "id": "prepare-order",
+      "name": "📝 Code: Prepare Order"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "operation": "create",
+        "baseId": {
+          "__rl": true,
+          "value": "appXXXXXXXXXXXXXX",
+          "mode": "list",
+          "cachedResultName": "Your Base"
+        },
+        "tableId": {
+          "__rl": true,
+          "value": "tblOrdersXXXXXXXX",
+          "mode": "list",
+          "cachedResultName": "Orders"
+        },
+        "data": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        800
+      ],
+      "id": "airtable-save-order",
+      "name": "💾 Airtable: Save Order"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const orderId = $json.id || 'ORDER_' + Date.now();\nconst checkoutLink = `https://so-mot.com/checkout?order_id=${orderId}&session=${$json.sessionId}`;\nreturn [{ json: { ...($json), checkout_link: checkoutLink, checkout_ready: true } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        800
+      ],
+      "id": "generate-checkout",
+      "name": "🔗 Code: Generate Checkout Link"
+    },
+    {
+      "parameters": {
+        "content": "# 🍜 So-Mot Sales Agent v2.0\n\n## Menu Sync Layer (Every 6 hours)\n- Fetches products from So-Mot.com\n- Parses & normalizes data\n- Caches in Airtable\n- Builds AI context",
+        "height": 380,
+        "width": 1180,
+        "color": 2
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1600,
+        1400
+      ],
+      "id": "sticky-menu-sync",
+      "name": "Sticky Note - Menu Sync"
+    },
+    {
+      "parameters": {
+        "content": "# 💬 Customer Interaction Layer\n- Facebook & Instagram webhooks\n- AI Agent processes messages\n- Generates sales responses\n- Sends via Graph API",
+        "height": 380,
+        "width": 1180,
+        "color": 3
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1296,
+        200
+      ],
+      "id": "sticky-interaction",
+      "name": "Sticky Note - Interaction"
+    },
+    {
+      "parameters": {
+        "content": "# 📦 Order Management Layer\n- Prepare order data\n- Save to Airtable\n- Generate checkout link\n- Track order status",
+        "height": 380,
+        "width": 400,
+        "color": 4
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1600,
+        600
+      ],
+      "id": "sticky-orders",
+      "name": "Sticky Note - Orders"
+    }
+  ],
+  "connections": {
+    "menu-sync-trigger": {
+      "main": [
+        [
+          {
+            "node": "fetch-somot-products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch-somot-products": {
+      "main": [
+        [
+          {
+            "node": "parse-products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse-products": {
+      "main": [
+        [
+          {
+            "node": "airtable-cache-menu",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "prepare-variations-fetch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "airtable-cache-menu": {
+      "main": [
+        [
+          {
+            "node": "build-ai-context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare-variations-fetch": {
+      "main": [
+        [
+          {
+            "node": "fetch-variations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "fetch-variations": {
+      "main": [
+        [
+          {
+            "node": "error-handler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "04b004fa-a779-4cd9-b8cd-cd75ca36affc": {
+      "main": [
+        [
+          {
+            "node": "8077f39f-8988-43bf-87ad-0fd29f30a6a7",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "b6cf5ffc-96ce-443a-8c24-bd887901741c",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8077f39f-8988-43bf-87ad-0fd29f30a6a7": {
+      "main": [
+        [
+          {
+            "node": "1b0b3b15-f6a9-4b06-8d6a-4ea2f3de3ca9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1b0b3b15-f6a9-4b06-8d6a-4ea2f3de3ca9": {
+      "main": [
+        [
+          {
+            "node": "5e92c88b-f0c3-460e-8e60-7a8d81e47618",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5e92c88b-f0c3-460e-8e60-7a8d81e47618": {
+      "main": [
+        [
+          {
+            "node": "c9c0dbf4-f31b-4a51-b99d-2020964f7705",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "c9c0dbf4-f31b-4a51-b99d-2020964f7705": {
+      "main": [
+        [
+          {
+            "node": "e39360ca-a99d-4cd5-ace7-b74344100868",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "e39360ca-a99d-4cd5-ace7-b74344100868": {
+      "main": [
+        [
+          {
+            "node": "6f3b3dd1-6863-44e8-af06-a59084b563cc",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "a145011c-e2df-4748-8f66-cbac50eba685",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "66919b72-0016-4e79-93f4-3a389d334765": {
+      "main": [
+        [
+          {
+            "node": "76ef689a-6efd-494e-8c49-c3735bcb4db0",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "13dbc7ec-d0d5-4087-9cef-20df236219f9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "76ef689a-6efd-494e-8c49-c3735bcb4db0": {
+      "main": [
+        [
+          {
+            "node": "eeb060ad-75fd-42fe-b06b-ef4a4dbd25d5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "eeb060ad-75fd-42fe-b06b-ef4a4dbd25d5": {
+      "main": [
+        [
+          {
+            "node": "d8fd5e8d-58a8-45f6-ab7e-35cdf4b1af89",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "d8fd5e8d-58a8-45f6-ab7e-35cdf4b1af89": {
+      "main": [
+        [
+          {
+            "node": "c9c0dbf4-f31b-4a51-b99d-2020964f7705",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
