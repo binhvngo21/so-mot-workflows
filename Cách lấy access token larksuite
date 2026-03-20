@@ -1,0 +1,128 @@
+      
+{
+  "name": "Cách lấy access token larksuite",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "349fe788-b8eb-4d22-a37c-e2785d09da00",
+      "name": "When clicking ‘Test workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "position": [
+        -420,
+        -140
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"app_id\": \"{{ $json.app_id }}\",\n  \"app_secret\": \"{{ $json.app_secret }}\"\n} ",
+        "options": {}
+      },
+      "id": "0dc32e8e-5438-40ff-ad9a-046ffa6fde3c",
+      "name": "Get Lark Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -20,
+        -140
+      ],
+      "typeVersion": 4.1
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "322bfa44-ee2a-4ddf-b747-0f7f3405e294",
+              "name": "app_id",
+              "type": "string",
+              "value": "cli_a8ef97a3a9f8102f"
+            },
+            {
+              "id": "c8faab22-235b-412c-8dc8-8142c6e2e0c4",
+              "name": "app_secret",
+              "type": "string",
+              "value": "ZnzDvhdc6Y7RhvnFX81EZdAt5zTaflP4"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "4ba7e71b-1860-4f8a-abc2-9f10fcf81396",
+      "name": "Input",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        -220,
+        -140
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "content": "You can get app_id and app_secret in Lark here: https://open.larksuite.com/"
+      },
+      "id": "c884af79-a617-409d-8758-d1ca23cf612c",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -40,
+        -340
+      ],
+      "typeVersion": 1
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Input": {
+      "main": [
+        [
+          {
+            "node": "Get Lark Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Lark Token": {
+      "main": [
+        []
+      ]
+    },
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "936ab323-e162-43a0-94c1-5e7fb3e7e232",
+  "meta": {
+    "instanceId": "2bb7f318444091660e91b4d8dbc79513143738b2f02ebaba9a70dbc0f875f483"
+  },
+  "id": "o1AaZOb0fBWha3ng",
+  "tags": []
+}
+
+    
