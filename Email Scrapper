@@ -1,0 +1,153 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Google Maps Email Scraper",
+        "formDescription": "Enter only the Google Maps location string.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Search Query",
+              "placeholder": "dentists",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Location",
+              "placeholder": "@-1.2319908,36.9197056,14z",
+              "requiredField": true
+            }
+          ]
+        }
+      },
+      "id": "Form Trigger",
+      "name": "Form Trigger",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
+      "position": [-1760, -112]
+    },
+    {
+      "parameters": {},
+      "id": "Input",
+      "name": "Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-1536, -112]
+    },
+    {
+      "parameters": {
+        "url": "https://serpapi.com/search.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "engine", "value": "google_maps" },
+            { "name": "q", "value": "={{ $json.searchQuery }}" },
+            { "name": "ll", "value": "={{ $json.location }}" },
+            { "name": "type", "value": "search" },
+            { "name": "api_key", "value": "={{ $json.serpApiKey }}" }
+          ]
+        }
+      },
+      "id": "Search SerpAPI",
+      "name": "Search SerpAPI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-1312, -112]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst settings = $('Input').first().json;\nconst maxResults = Number(settings.maxResults || 10);\nconst localResults = Array.isArray(input.local_results) ? input.local_results : [];\n\nfunction normalizeWebsite(url) {\n  if (!url || typeof url !== 'string') return '';\n  return url.trim();\n}\n\nfunction extractDomain(url) {\n  try {\n    const value = url.startsWith('http') ? url : `https://${url}`;\n    return new URL(value).hostname.replace(/^www\\./, '');\n  } catch {\n    return '';\n  }\n}\n\nreturn localResults.slice(0, maxResults).map((biz, index) => {\n  const website = normalizeWebsite(biz.website || biz.link || '');\n  const domain = extractDomain(website);\n  return {\n    json: {\n      index: index + 1,\n      searchQuery: settings.searchQuery,\n      location: settings.location,\n      spreadsheetId: settings.spreadsheetId,\n      sheetName: settings.sheetName,\n      hunterApiKey: settings.hunterApiKey,\n      title: biz.title || '',\n      address: biz.address || '',\n      phone: biz.phone || '',\n      website,\n      domain,\n      rating: biz.rating || '',\n      reviews: biz.reviews || ''\n    }\n  };\n});"
+      },
+      "id": "Prepare Businesses",
+      "name": "Prepare Businesses",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1088, -112]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.domain }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "Has Domain?",
+      "name": "Has Domain?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-864, -112]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hunter.io/v2/domain-search",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "domain", "value": "={{ $json.domain }}" },
+            { "name": "api_key", "value": "={{ $json.hunterApiKey }}" }
+          ]
+        }
+      },
+      "id": "Hunter Domain Search",
+      "name": "Hunter Domain Search",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-640, -208]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const hunter = $json;\nconst source = $items('Has Domain?', 0, $itemIndex)[0]?.json || {};\nconst emails = (((hunter.data || {}).emails) || []).map(e => e.value).filter(Boolean);\nreturn {\n  json: {\n    index: source.index,\n    searchQuery: source.searchQuery,\n    location: source.location,\n    spreadsheetId: source.spreadsheetId,\n    sheetName: source.sheetName,\n    businessName: source.title,\n    address: source.address,\n    phone: source.phone,\n    website: source.website,\n    domain: source.domain,\n    rating: source.rating,\n    reviews: source.reviews,\n    emails: emails.join('; ')\n  }\n};"
+      },
+      "id": "Format Hunter Result",
+      "name": "Format Hunter Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-416, -208]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    index: $json.index,\n    searchQuery: $json.searchQuery,\n    location: $json.location,\n    spreadsheetId: $json.spreadsheetId,\n    sheetName: $json.sheetName,\n    businessName: $json.title,\n    address: $json.address,\n    phone: $json.phone,\n    website: $json.website,\n    domain: $json.domain,\n    rating: $json.rating,\n    reviews: $json.reviews,\n    emails: ''\n  }\n};"
+      },
+      "id": "No Domain Result",
+      "name": "No Domain Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-416, -16]
+    },
+    {
+      "parameters": {},
+      "id": "Merge Results",
+      "name": "Merge Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [-192, -112]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(item => item.json).sort((a, b) => a.index - b.index);\nreturn rows.map(row => ({\n  json: {\n    spreadsheetId: row.spreadsheetId,\n    sheetName: row.sheetName,\n    searchQuery: row.searchQuery,\n    location: row.location,\n    businessName: row.businessName,\n    address: row.address,\n    phone: row.phone,\n    website: row.website || 'N/A',\n    domain: row.domain || 'N/A',\n    rating: row.rating || 'N/A',\n    reviews: row.reviews || 'N/A',\n    emails: row.emails || ''\n  }\n}));"
+      },
+      "id": "Build Sheet Rows",
+      "name": "Build Sheet Rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [32, -112]
+    },
+    {
+      "parameters": {
+        "operation": "append"
+      },
+      "id": "Google Sheets",
+      "name": "Google Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [256, -112]
+    }
+  ],
+  "connections": {}
+}
+
